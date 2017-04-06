@@ -1,0 +1,13 @@
+{
+  "name": "LPF by Terry Myers",
+  "keywords": "Low Pass Filter",
+  "description": "Simple Low Pass Filter library",
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/terryjmyers/LPF.git"
+  },
+  "frameworks": "arduino",
+  "platforms": "*"
+}
+
