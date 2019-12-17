@@ -1,5 +1,10 @@
 # LPF Low Pass Filter Library
 
+A First Order Low Pass Filter library  
+
+Current Version = 1.3  
+Version Date = 12/17/2019  
+
 **How to use**  
 1. Add constructor and input time constant: i.e. LPF AnalogValueLPF(10);  
 2. Every time you get a new Analog Value to filter (i.e. analogRead(A0)), call the Step method and pass it in.  
