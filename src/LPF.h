@@ -1,12 +1,99 @@
 /*
 LPF - Low Pass Filter Library
-	Adapted from code retrieved from http://www.schwietering.com/jayduino/filtuino
+https://github.com/terryjmyers/LPF.git
+Author =			GitHub.com/TerryJMyers
+Current Version =	1.3
+Version Date =		12/17/2019
+
+A First Order Low Pass Filter library
+
+	How to use
+		Add constructor and input time constant: i.e. LPF AnalogValueLPF(10);
+		Every time you get a new Analog Value to filter (i.e. analogRead(A0)), call the Step method and pass it in.
+			The Step method will return the filtered ananalog value:: i.e. PostFilteredAnalogValue = AnalogValueLPF.step(analogRead(A0))
+			Returns NAN if there is a problem.  Check GetErrorMessage for human readable message as to the error: 
+				i.e. 
+				if (AnalogValueLPF.step(PreFilteredAnalogValue) == NAN) {
+					Serial.println(AnalogValueLPF.GetErrorMessage());
+				}
+		Any time you want, directly set the time constant in units of seconds: i.e. AnalogValueLPF.RC = 1;
+		Set the time constant based on cuttoff frequency (fc) by having the Setfc method calculate the RC and set it for you
+		All internal variables are doubles for maximum precision.  For maximum speed I recommend converting your pre filtered value first and returning it into a double:
+			i.e.
+				double PreFilteredAnalogValue = double(analogRead(A0));
+				double PostFilteredAnalogValue = AnalogValueLPF.step(PreFilteredAnalogValue); //Use the 'PostFilteredAnalogValue' elsewhere in your code by scaling it or whatever
+				if (PostFilteredAnalogValue == NAN) {
+					//Do something here...something went wrong
+					Serial.println(AnalogValueLPF.GetErrorMessage());
+				}
+
+	Simple Usage (Note this program hasn't actually been tested, but you get the idea):
+		#include <LPF.h>
+		LPF AnalogValueLPF(1);			//Create a LPF will a time constant of 1second
+		int PostFilteredRawAnalogValue;	//The final filtered value to use in your program, ready for scaling
+		Setup {
+		  Serial.Begin(115200);
+		}
+		loop {
+			int PreFilteredRawAnalogValue = analogRead(A0);
+			PostFilteredRawAnalogValue = AnalogValueLPF.Step(PreFilteredAnalogValue);		//Perform Low Pass Filter
+			Serial.print(F(" Pre= ")); Serial.println(PreFilteredAnalogValue);
+			Serial.print(F(" Post= ")); Serial.println(PostFilteredAnalogValue);
+			Serial.print();
+			//....Rest of program here, such as scaling PostFilteredRawAnalogValue to useable units
+			delay(10); //Just to prevent spamming of Serial port
+		}
+
+	Suggested Usage (Note this program hasn't actually been tested, but you get the idea):
+		#include <LPF.h>
+		LPF AnalogValueLPF(1);			//Create a LPF will a time constant of 1second
+		double PostFilteredRawAnalogValue;	//The final filtered value used in your program
+		double ScaledValue;
+		Setup {
+			Serial.Begin(115200);
+		}
+		loop {
+
+			//Library internal variables are all 'double', you will save some time in method calls if you convert to double right away and return to a double
+			//Get Raw analog value and convert it to a double right away (the library is just going to do this anyway)
+			double PreFilteredAnalogValue = double(random(0, 100));
+
+			//Perform Low Pass Filter
+			PostFilteredAnalogValue = AnalogValueLPF.Step(PreFilteredAnalogValue);
+
+			//Error Checking
+			if (PostFilteredAnalogValue == NAN) {//Something Went Wrong, handle it, you don't want the rest of your code working with a bad number
+				//Do something to handle that its a bad number, such as go to scale high.
+				ScaledValue = 100.0;
+				Serial.println(AnalogValueLPF.GetErrorMessage());
+			} 
+			else {
+				//PostFilteredAnalogValue is good!  Scale it or something.  Example below scales a 12bit analog between 0-100.0
+				ScaledValue = PostFilteredAnalogValue / 4096.0 * 100.0;
+			}
+
+			Serial.print(F(" Pre= ")); Serial.println(PreFilteredAnalogValue);
+			Serial.print(F(" Post= ")); Serial.println(PostFilteredAnalogValue);
+			Serial.println();
+
+			//....Rest of program here
+
+			delay(10); //Just to prevent spamming of Serial port
+		}
 
 
 
-	https://github.com/terryjmyers/LPF.git
-    v1.1 - Condensed the multiple functions into one LPF function with a Stregth input
-    v1.0 - First release
+
+	
+	v1.3 - Modified to dynamically calculate the clock cycles per us dynamically based on F_CPU
+			Moved assembly code for getting clock cycles into main step method to avoid an additional call
+			Added Additional overloads for direct use of analogRead and other ints
+	v1.2 - Modified to dynamic assignment of LPF coeffients based on a cutoff frequency or time constant
+			adapated from: https://www.quora.com/Whats-the-C-coding-for-a-low-pass-filter
+	v1.1 - Condensed the multiple functions into one LPF function with a Stregth input
+	v1.0 - First release
+			Adapted from code retrieved from http://www.schwietering.com/jayduino/filtuino
+
 */
 #ifndef LPF_H
 #define LPF_H
@@ -18,92 +105,129 @@ LPF - Low Pass Filter Library
 class LPF
 {
 	public:
-		LPF(uint8_t Strenth = 1) { //set the LPF up initially with alpha = 0.5 the lowest setting if no value is passed in
-			setStrength(Strenth);	
-		}
+		//Constructor Overloads
+		LPF(double _RC) { RC = _RC; _SecondsPerClockCycle = double(1) / double(F_CPU); }
+		LPF(float _RC) { RC = double(_RC); _SecondsPerClockCycle = double(1) / double(F_CPU); }
+		LPF(int _RC) { RC = double(_RC); _SecondsPerClockCycle = double(1) / double(F_CPU); }
+		LPF(void) {	RC = 1.0;	_SecondsPerClockCycle = double(1) / double(F_CPU); }
 
-		float step(float x) {
-			if (_Strength==0) return x; //return if filter is disabled
-			//If the LPF hasn't been initiated once, set the internal variables up so that it reports the current value immediatly
-				if (_Strength != _StrengthREM) init(x); //_StrengthREM is set to -1 on instantiation so the first time this is run it will trigger an init
-			//Calculate the LPF algorithm
-				v[0] = v[1];
-				v[1] = (_c1 * x) + (_c2 * v[0]);
-			//remember for the next step
-				_StrengthREM = _Strength; 
-			return (v[0] + v[1]);
-		}
+		//Set the Time Constant in units of seconds at any time
+		double RC = 0.0;
 
-		//Saturate the internal data so that it the filter reports the value immediatly
-			void init(float x) {
-				v[0] = x / 2.0;
-				v[1] = v[0];
+
+		// Calculate the Time Consant from a cutoff frequency
+		void Setfc(double CutoffFrequency) { RC = 1.0 / (CutoffFrequency * 2.0 * PI); } 
+		void Setfc(float CutoffFrequency) { Setfc(double(CutoffFrequency)); }
+		void Setfc(int CutoffFrequency) { Setfc(double(CutoffFrequency)); }
+
+		//Call to re-initialize the Filter
+		void init(double _PreFilteredAnalog) {_PreviousPreFilteredAnalog = _PreFilteredAnalog; }
+		void init(float _PreFilteredAnalog) { init(double(_PreFilteredAnalog)); }
+
+
+		/*
+		Step Method
+			Every time you get a new Analog Value to filter (i.e. analogRead(A0)), call the Step method and pass it in.
+			The Step method will return the filtered ananalog value:: i.e. PostFilteredAnalogValue = AnalogValueLPF.step(analogRead(A0))
+			Returns NAN if there is a problem.  Check GetErrorMessage for human readable message as to the error: i.e. 
+				if (AnalogValueLPF.step(SomePreFilteredAnalogValue) == NAN) {
+					Serial.println(AnalogValueLPF.GetErrorMessage());
+				}
+			Additional Overloads for method are provided below
+		*/
+		double Step(double _PreFilteredAnalog) {
+
+			//If this is the first call to this routine don't actually do anything but return the value you just passed in	
+			if (_FirstRun == false) {
+				_FirstRun = true; //Remember that you've called this routine previously
+
+				//Create Assembly code that gets the clock cycles the fastest way possible
+				#ifdef ESP32
+					__asm__ __volatile__("esync; rsr %0,ccount":"=a" (_ClockCyclesPrevious));
+				#else
+					#ifdef ESP8266
+						__asm__ __volatile__("rsr %0,ccount":"=a"(_ClockCyclesPrevious));
+					#else
+						#error LPF.h ERROR: Library Depends on assembly level programming to retrieve clock cycles as quick as possible so that the Step function can be called every scan.  Only ESP8266 and ESP32 is implemented
+					#endif
+				#endif
+				init(_PreFilteredAnalog); //Remember what the previous value was
+				return _PreFilteredAnalog; //return what you've passed in.
 			}
 
-		//0=disable, 1=0.05alpha, 2=0.01alpha, 3=0.00 alpha, 4=0.0001alpha
-		void setStrength(uint8_t s) {
-			_Strength = s; //set the internal Strength variable
-			switch (_Strength)
+			uint32_t ClockCycles;
+			//Create Assembly code that gets the clock cycles the fastest way possible
+			#ifdef ESP32
+					__asm__ __volatile__("esync; rsr %0,ccount":"=a" (ClockCycles));
+				#else
+					#ifdef ESP8266
+						__asm__ __volatile__("rsr %0,ccount":"=a"(ClockCycles));
+					#else
+						#error LPF.h ERROR: Library Depends on assembly level programming to retrieve clock cycles as quick as possible so that the Step function can be called every scan.  Only ESP8266 and ESP32 is implemented
+					#endif
+				#endif
+			double _dt = double(ClockCycles - _ClockCyclesPrevious) * _SecondsPerClockCycle; //Calculate
+
+
+			double _alpha;
+			if (RC >= 0.0) {
+				if (_dt > 0.0) {					
+					_ErrorCode = 0;
+					_alpha = _dt / (RC + _dt);
+					_ClockCyclesPrevious = ClockCycles; //Remember the time captured above
+					_PreviousPreFilteredAnalog += _alpha * (_PreFilteredAnalog - _PreviousPreFilteredAnalog);
+					/*
+					//Just some debug code used during development
+					Serial.println("-------------------");
+					Serial.print(F("RC = ")); Serial.println(RC,13);
+					Serial.print(F("RC >= 0.0 = ")); Serial.println(RC >= 0.0);
+					Serial.print(F("_dt = ")); Serial.println(_dt,13);
+					Serial.print(F("_dt > 0.0 = ")); Serial.println(_dt > 0.0);
+					Serial.print(F("RC + _dt = ")); Serial.println(RC + _dt,13);
+					Serial.print(F("_alpha = _dt / (RC + _dt) = ")); Serial.println(_alpha,13);
+					Serial.print(F("_alpha = ")); Serial.println(_alpha,13);
+					Serial.print(F("_PreFilteredAnalog = ")); Serial.println(_PreFilteredAnalog,13);
+					Serial.print(F("_PreviousPreFilteredAnalog = ")); Serial.println(_PreviousPreFilteredAnalog,13);
+					Serial.print(F("_PreviousPreFilteredAnalog += _alpha * (_PreFilteredAnalog - _PreviousPreFilteredAnalog = ")); Serial.println(_PreviousPreFilteredAnalog,13);
+					Serial.println("-------------------");
+					*/
+					return _PreviousPreFilteredAnalog;
+				}
+				else {
+					_ErrorCode = 2;
+					return NAN;
+				}
+			}
+			else {
+				_ErrorCode = 1;
+				return NAN;				
+			}
+		}
+		
+		//Additional Overloads
+		float Step(float _PreFilteredAnalog)	{	double temp = double(_PreFilteredAnalog);	return float(Step(temp));	};
+		int Step(int _PreFilteredAnalog)		{	double temp = double(_PreFilteredAnalog);	return int(Step(temp));		};
+
+		//Get a human Readable Error Code.  Do this if Step returns NAN.
+		String GetErrorMessage(void) {
+			switch (_ErrorCode)
 			{
-			case 0://disable filter, return immediatly
-				return;
-			case 1: //alpha = 0.05
-				/*
-				Low pass butterworth filter order=1 alpha1=0.05
-				63% after 4 steps
-				95% after 10 steps
-				99.5% after 17 steps
-				99.99% after 29 steps
-				*/
-				_c1 = 1.367287359973195227e-1;
-				_c2 = 0.72654252800536101020;
-				break;
-			case 2: //alpha = 0.01
-				/*
-				Low pass butterworth filter order=1 alpha1=0.01
-				63% after 16 steps
-				95% after 48 steps
-				99.5% after 85 steps
-				99.99% after 147 steps
-				*/
-				_c1 = 3.046874709125380054e-2;
-				_c2 = 0.93906250581749239892;
-				break;
-			case 3: //alpha = 0.001
-				/*
-				Low pass butterworth filter order=1 alpha1=0.001
-				63% after 159 steps
-				95% after 478 steps
-				99.5% after 844 steps
-				99.99% after 1100 steps
-				*/
-				_c1 = 3.131764229192701265e-3;
-				_c2 = 0.99373647154161459660;
-				break;
-			case 4: //alpha = 0.0001
-				/*
-				Low pass butterworth filter order=1 alpha1=0.0001
-				63% after 1583 steps
-				95% after 4768 steps
-				99.5% after 8433 steps
-				99.99% after 14659 steps
-				*/
-				_c1 = 3.140606106404320030e-4;
-				_c2 = 0.99937187877871913599;
-				break;
-			default: //Set default the same as alpha = 0.05 above
-				_c1 = 1.367287359973195227e-1;
-				_c2 = 0.72654252800536101020;
+			case 0:
+				return F("No Error");
+			case 1:
+				return F("Time Constant (LPF.RC) must be > 0");
+			case 2:
+				return F("Time Between Step Calls must be > 0");
+			default:
 				break;
 			}
 		}
-		uint8_t getStrength(void) { return _Strength; }
 
-	private:
-		float v[2]; //storage values
-		float _c1;	//coefficient 1
-		float _c2;//coefficient 2
-		uint8_t _Strength;
-		uint8_t _StrengthREM=-1; //Remember what Strength was the last time Step was run
+private:
+	double		_SecondsPerClockCycle;
+	bool		_FirstRun = 0;
+	double		_PreviousPreFilteredAnalog;
+	uint32_t	_ClockCyclesPrevious = 0;
+	uint8_t		_ErrorCode = 0;
 };
 #endif

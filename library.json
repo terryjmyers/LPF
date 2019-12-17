@@ -1,7 +1,7 @@
 {
-  "name": "LPF by Terry Myers",
+  "name": "LPF Low Pass Filter",
   "keywords": "Low Pass Filter",
-  "description": "Simple Low Pass Filter library",
+  "description": "Low Pass Filter library",
   "repository":
   {
     "type": "git",

@@ -1,45 +1,43 @@
 
 /*
 LPF
-Low Pass Filter
+Low Pass Filter Example
+
 */
 
+
 #include <LPF.h>
-float Unstable_Signal = 0.0; //create a numebr for random data
-
-//define some low pass filters with different strengths.  Review the LPF.h for more information
-//0=disable, 1=0.05alpha, 2=0.01alpha, 3=0.00 alpha, 4=0.0001alpha
-LPF LowPF05(1);
-LPF LowPF01(2);
-LPF LowPF001(3);
-LPF LowPF0001(4);
-
-
-void setup(void) 
-{
-  //Setup Serial 
-  //In case the user uses the default setting in Arduino, give them a message to change BAUD rate
-    Serial.begin(9600);
-    Serial.println(F("Set Serial baud rate to 250 000"));
-    Serial.flush ();   // wait for send buffer to empty
-    delay (2);    // let last character be sent
-    Serial.end ();      // close serial
-    Serial.begin(250000);
-    Serial.println();
-
-    //Initialze the REALLY slow filter to the average of the signal random values.  You will see the LPF0001 already "at the average"
-    LowPF0001.init(50.0);
+LPF AnalogValueLPF(1);			//Create a LPF will a time constant of 1second
+double PostFilteredRawAnalogValue;	//The final filtered value used in your program
+double ScaledValue;
+Setup {
+	Serial.Begin(115200);
 }
+loop {
 
-void loop(void) {
+	//Library internal variables are all 'double', you will save some time in method calls if you convert to double right away and return to a double
+	//Get Raw analog value and convert it to a double right away (the library is just going to do this anyway)
+	double PreFilteredAnalogValue = double(random(0, 100));
 
-  Unstable_Signal=random(0,100); //create a random number between 0 and 100, which would have an average of 50
-Serial.print("Unstable Signal = ");  Serial.print(Unstable_Signal);
- Serial.print("   LPF05=");    Serial.print(LowPF05.step(Unstable_Signal));
-Serial.print("   LPF01=");    Serial.print(LowPF01.step(Unstable_Signal));
-Serial.print("   LPF001=");   Serial.print(LowPF001.step(Unstable_Signal));
-Serial.print("   LPF0001=");  Serial.print(LowPF0001.step(Unstable_Signal));
-Serial.println();
-delay(10);
+	//Perform Low Pass Filter
+	PostFilteredAnalogValue = AnalogValueLPF.Step(PreFilteredAnalogValue);
 
+	//Error Checking
+	if (PostFilteredAnalogValue == NAN) {//Something Went Wrong, handle it, you don't want the rest of your code working with a bad number
+		//Do something to handle that its a bad number, such as go to scale high.
+		ScaledValue = 100.0;
+		Serial.println(AnalogValueLPF.GetErrorMessage());
+	} 
+	else {
+		//PostFilteredAnalogValue is good!  Scale it or something.  Example below scales a 12bit analog between 0-100.0
+		ScaledValue = PostFilteredAnalogValue / 4096.0 * 100.0;
+	}
+
+	Serial.print(F(" Pre= ")); Serial.println(PreFilteredAnalogValue);
+	Serial.print(F(" Post= ")); Serial.println(PostFilteredAnalogValue);
+	Serial.println();
+
+	//....Rest of program here
+
+	delay(10); //Just to prevent spamming of Serial port
 }

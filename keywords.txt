@@ -10,5 +10,8 @@ LPF	KEYWORD1
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
-step	KEYWORD2
-setStrength	KEYWORD2
+Step	KEYWORD2
+Setfc	KEYWORD2
+init	KEYWORD2
+GetErrorMessage	KEYWORD2
+RC	KEYWORD2
